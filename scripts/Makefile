@@ -36,9 +36,6 @@ HOSTLDLIBS_sorttable = -lpthread
 HOSTCFLAGS_asn1_compiler.o = -I$(srctree)/include
 HOSTCFLAGS_sign-file.o = $(shell $(HOSTPKG_CONFIG) --cflags libcrypto 2> /dev/null)
 HOSTCFLAGS_sign-file.o += -I$(srctree)/tools/include/uapi/
-# tools/include/uapi/linux/types.h pulls <asm-generic/int-ll64.h> from the
-# real uapi tree (not mirrored under tools/).
-HOSTCFLAGS_sign-file.o += -I$(srctree)/include/uapi
 HOSTLDLIBS_sign-file = $(shell $(HOSTPKG_CONFIG) --libs libcrypto 2> /dev/null || echo -lcrypto)
 
 ifdef CONFIG_UNWINDER_ORC
