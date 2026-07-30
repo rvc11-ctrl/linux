@@ -301,10 +301,12 @@ static void ipa_hardware_config_qsb(struct ipa *ipa)
 	val |= u32_encode_bits(max1, GEN_QMB_1_MAX_WRITES_FMASK);
 	iowrite32(val, ipa->reg_virt + IPA_REG_QSB_MAX_WRITES_OFFSET);
 
+	/* No QSB programming on IPA v2.6L */
+	if (version == IPA_VERSION_2_6L)
+		return;
+
 	max1 = 12;
 	switch (version) {
-	case IPA_VERSION_2_6L: /* No QSB on IPA v2.6L */
-		break;
 	case IPA_VERSION_3_5_1:
 		max0 = 8;
 		break;
@@ -318,6 +320,9 @@ static void ipa_hardware_config_qsb(struct ipa *ipa)
 		break;
 	case IPA_VERSION_4_5:
 		max0 = 0;		/* No limit (hardware maximum) */
+		break;
+	default:
+		max0 = 8;
 		break;
 	}
 	val = u32_encode_bits(max0, GEN_QMB_0_MAX_READS_FMASK);

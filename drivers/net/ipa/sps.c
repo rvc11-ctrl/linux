@@ -350,6 +350,7 @@ static int sps_channel_setup(struct sps *sps)
 		dev_err(sps->dev, "channel %u not supported by hardware\n",
 			channel_id - 1);
 		channel_id = SPS_CHANNEL_COUNT_MAX;
+		ret = -EINVAL;
 		goto err_unwind;
 	}
 

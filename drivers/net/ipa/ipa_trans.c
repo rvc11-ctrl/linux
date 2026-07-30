@@ -231,6 +231,8 @@ void ipa_trans_move_pending(struct ipa_trans *trans)
 		trans_info = &trans->gsi->channel[trans->channel_id].trans_info;
 	else if (trans->sps)
 		trans_info = &trans->sps->channel[trans->channel_id].trans_info;
+	else
+		return;
 
 	spin_lock_bh(&trans_info->spinlock);
 
@@ -251,6 +253,8 @@ void ipa_trans_move_complete(struct ipa_trans *trans)
 		trans_info = &trans->gsi->channel[trans->channel_id].trans_info;
 	else if (trans->sps)
 		trans_info = &trans->sps->channel[trans->channel_id].trans_info;
+	else
+		return;
 
 	spin_lock_bh(&trans_info->spinlock);
 
@@ -270,6 +274,8 @@ void ipa_trans_move_polled(struct ipa_trans *trans)
 		trans_info = &trans->gsi->channel[trans->channel_id].trans_info;
 	else if (trans->sps)
 		trans_info = &trans->sps->channel[trans->channel_id].trans_info;
+	else
+		return;
 
 	spin_lock_bh(&trans_info->spinlock);
 

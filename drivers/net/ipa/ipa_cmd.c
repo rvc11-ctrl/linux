@@ -734,7 +734,7 @@ void ipa_cmd_dma_shared_mem_add(struct ipa_trans *trans, u32 offset, u16 size,
 		payload = &cmd_payload->dma_shared_mem_v2;
 
 		payload->size = cpu_to_le16(size);
-		payload->local_addr = cpu_to_le32(offset);
+		payload->local_addr = cpu_to_le16(offset);
 		/* payload->flags:
 		 *   direction:		0 = write to IPA, 1 read from IPA
 		 */
@@ -755,22 +755,24 @@ static void ipa_cmd_ip_tag_status_add(struct ipa_trans *trans, u64 tag)
 	struct ipa_cmd_ip_packet_tag_status *payload;
 	union ipa_cmd_payload *cmd_payload;
 	dma_addr_t payload_addr;
-	u64 tag_mask;
 
-	if (trans->gsi) {
+	if (trans->gsi)
 		ipa = container_of(trans->gsi, struct ipa, gsi);
-		tag_mask = IPA_V3_IP_PACKET_TAG_STATUS_TAG_FMASK;
-	} else {
+	else
 		ipa = container_of(trans->sps, struct ipa, sps);
-		tag_mask = IPA_V2_IP_PACKET_TAG_STATUS_TAG_FMASK;
-	}
 
 	/* assert(tag <= field_max(IP_PACKET_TAG_STATUS_TAG_FMASK)); */
 
 	cmd_payload = ipa_cmd_payload_alloc(ipa, &payload_addr);
 	payload = &cmd_payload->ip_packet_tag_status;
 
-	payload->tag = u64_encode_bits(tag, tag_mask);
+	/* Mask must be a compile-time constant for *_encode_bits(). */
+	if (trans->gsi)
+		payload->tag = u64_encode_bits(tag,
+					IPA_V3_IP_PACKET_TAG_STATUS_TAG_FMASK);
+	else
+		payload->tag = u64_encode_bits(tag,
+					IPA_V2_IP_PACKET_TAG_STATUS_TAG_FMASK);
 
 	ipa_trans_cmd_add(trans, payload, sizeof(*payload),
 			payload_addr, direction, opcode);
