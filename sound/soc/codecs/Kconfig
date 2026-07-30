@@ -2167,6 +2167,11 @@ config SND_SOC_TAS2552
 	tristate "Texas Instruments TAS2552 Mono Audio amplifier"
 	depends on I2C
 
+config SND_SOC_TAS2557
+	tristate "Texas Instruments TAS2557 Mono Audio amplifier"
+	depends on I2C
+	select REGMAP_I2C
+
 config SND_SOC_TAS2562
 	tristate "Texas Instruments TAS2562 Mono Audio amplifier"
 	depends on I2C

@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0
 
 /* Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
- * Copyright (C) 2018-2024 Linaro Ltd.
+ * Copyright (C) 2018-2020 Linaro Ltd.
  */
 
-#include <linux/qrtr.h>
-#include <linux/string.h>
 #include <linux/types.h>
+#include <linux/string.h>
+#include <linux/slab.h>
+#include <linux/qrtr.h>
+#include <linux/soc/qcom/qmi.h>
 
 #include "ipa.h"
+#include "ipa_endpoint.h"
 #include "ipa_mem.h"
+#include "ipa_table.h"
 #include "ipa_modem.h"
 #include "ipa_qmi_msg.h"
 
@@ -92,7 +96,7 @@ static void ipa_server_init_complete(struct ipa_qmi *ipa_qmi)
 				   IPA_QMI_INIT_COMPLETE_IND_SZ,
 				   ipa_init_complete_ind_ei, &ind);
 	if (ret)
-		dev_err(ipa->dev,
+		dev_err(&ipa->pdev->dev,
 			"error %d sending init complete indication\n", ret);
 	else
 		ipa_qmi->indication_sent = true;
@@ -121,11 +125,14 @@ static void ipa_qmi_indication(struct ipa_qmi *ipa_qmi)
  */
 static void ipa_qmi_ready(struct ipa_qmi *ipa_qmi)
 {
-	struct ipa *ipa;
+	struct ipa *ipa = container_of(ipa_qmi, struct ipa, qmi);
 	int ret;
 
+	bool uc_ready = (ipa->version > IPA_VERSION_2_6L) ?
+		ipa_qmi->uc_ready : ipa->uc_loaded;
+
 	/* We aren't ready until the modem and microcontroller are */
-	if (!ipa_qmi->modem_ready || !ipa_qmi->uc_ready)
+	if (!ipa_qmi->modem_ready || !uc_ready)
 		return;
 
 	/* Send the indication message if it was requested */
@@ -144,7 +151,7 @@ static void ipa_qmi_ready(struct ipa_qmi *ipa_qmi)
 	ipa = container_of(ipa_qmi, struct ipa, qmi);
 	ret = ipa_modem_start(ipa);
 	if (ret)
-		dev_err(ipa->dev, "error %d starting modem\n", ret);
+		dev_err(&ipa->pdev->dev, "error %d starting modem\n", ret);
 }
 
 /* All QMI clients from the modem node are gone (modem shut down or crashed). */
@@ -195,7 +202,7 @@ static void ipa_server_indication_register(struct qmi_handle *qmi,
 		ipa_qmi->indication_requested = true;
 		ipa_qmi_ready(ipa_qmi);		/* We might be ready now */
 	} else {
-		dev_err(ipa->dev,
+		dev_err(&ipa->pdev->dev,
 			"error %d sending register indication response\n", ret);
 	}
 }
@@ -224,7 +231,97 @@ static void ipa_server_driver_init_complete(struct qmi_handle *qmi,
 		ipa_qmi->uc_ready = true;
 		ipa_qmi_ready(ipa_qmi);		/* We might be ready now */
 	} else {
-		dev_err(ipa->dev,
+		dev_err(&ipa->pdev->dev,
+			"error %d sending init complete response\n", ret);
+	}
+}
+
+static void ipa_config_req_handler(struct qmi_handle *qmi,
+				   struct sockaddr_qrtr *sq,
+				   struct qmi_txn *txn,
+				   const void *decoded)
+{
+	struct ipa_config_rsp rsp = { };
+	struct ipa_qmi *ipa_qmi;
+	struct ipa *ipa;
+	int ret;
+
+	ipa_qmi = container_of(qmi, struct ipa_qmi, server_handle);
+	ipa = container_of(ipa_qmi, struct ipa, qmi);
+
+	dev_info(&ipa->pdev->dev, "handling config req\n");
+
+	rsp.rsp.result = QMI_RESULT_SUCCESS_V01;
+	rsp.rsp.error = QMI_ERR_NONE_V01;
+
+	ret = qmi_send_response(qmi, sq, txn, IPA_QMI_DRIVER_INIT_COMPLETE,
+				IPA_QMI_DRIVER_INIT_COMPLETE_RSP_SZ,
+				ipa_driver_init_complete_rsp_ei, &rsp);
+	if (!ret) {
+		ipa_qmi->uc_ready = true;
+		ipa_qmi_ready(ipa_qmi);		/* We might be ready now */
+	} else {
+		dev_err(&ipa->pdev->dev,
+			"error %d sending init complete response\n", ret);
+	}
+}
+
+static void ipa_install_filter_handler(struct qmi_handle *qmi,
+				       struct sockaddr_qrtr *sq,
+				       struct qmi_txn *txn,
+				       const void *decoded)
+{
+	struct ipa_install_fltr_rule_rsp rsp = { };
+	struct ipa_qmi *ipa_qmi;
+	struct ipa *ipa;
+	int ret;
+
+	ipa_qmi = container_of(qmi, struct ipa_qmi, server_handle);
+	ipa = container_of(ipa_qmi, struct ipa, qmi);
+
+	dev_info(&ipa->pdev->dev, "handling filter install\n");
+
+	rsp.rsp.result = QMI_RESULT_SUCCESS_V01;
+	rsp.rsp.error = QMI_ERR_NONE_V01;
+
+	ret = qmi_send_response(qmi, sq, txn, IPA_QMI_DRIVER_INIT_COMPLETE,
+				IPA_QMI_DRIVER_INIT_COMPLETE_RSP_SZ,
+				ipa_driver_init_complete_rsp_ei, &rsp);
+	if (!ret) {
+		ipa_qmi->uc_ready = true;
+		ipa_qmi_ready(ipa_qmi);		/* We might be ready now */
+	} else {
+		dev_err(&ipa->pdev->dev,
+			"error %d sending init complete response\n", ret);
+	}
+}
+
+static void ipa_qmi_notify_filter_installed(struct qmi_handle *qmi,
+					    struct sockaddr_qrtr *sq,
+					    struct qmi_txn *txn,
+					    const void *decoded)
+{
+	struct ipa_fltr_installed_notif_rsp rsp = { };
+	struct ipa_qmi *ipa_qmi;
+	struct ipa *ipa;
+	int ret;
+
+	ipa_qmi = container_of(qmi, struct ipa_qmi, server_handle);
+	ipa = container_of(ipa_qmi, struct ipa, qmi);
+
+	dev_info(&ipa->pdev->dev, "modem requested filter install notifier");
+
+	rsp.rsp.result = QMI_RESULT_SUCCESS_V01;
+	rsp.rsp.error = QMI_ERR_NONE_V01;
+
+	ret = qmi_send_response(qmi, sq, txn, IPA_QMI_DRIVER_INIT_COMPLETE,
+				IPA_QMI_DRIVER_INIT_COMPLETE_RSP_SZ,
+				ipa_driver_init_complete_rsp_ei, &rsp);
+	if (!ret) {
+		ipa_qmi->uc_ready = true;
+		ipa_qmi_ready(ipa_qmi);		/* We might be ready now */
+	} else {
+		dev_err(&ipa->pdev->dev,
 			"error %d sending init complete response\n", ret);
 	}
 }
@@ -245,7 +342,27 @@ static const struct qmi_msg_handler ipa_server_msg_handlers[] = {
 		.decoded_size	= IPA_QMI_DRIVER_INIT_COMPLETE_REQ_SZ,
 		.fn		= ipa_server_driver_init_complete,
 	},
-	{ },
+	{
+		.type		= QMI_REQUEST,
+		.msg_id		= IPA_QMI_CONFIG_REQUEST,
+		.ei		= ipa_config_req_ei,
+		.decoded_size	= IPA_QMI_CONFIG_REQ_SZ,
+		.fn		= ipa_config_req_handler,
+	},
+	{
+		.type		= QMI_REQUEST,
+		.msg_id		= IPA_QMI_INSTALL_FILTER_RULE,
+		.ei		= ipa_install_fltr_rule_req_ei,
+		.decoded_size	= IPA_QMI_INSTALL_FILTER_RULE_REQ_SZ,
+		.fn		= ipa_install_filter_handler,
+	},
+	{
+		.type		= QMI_REQUEST,
+		.msg_id		= IPA_QMI_NOTIFY_FILTER_INSTALLED,
+		.ei		= ipa_qmi_notify_filter_installed_ei,
+		.decoded_size	= IPA_QMI_NOTIFY_FILTER_INSTALLED_REQ_SZ,
+		.fn		= ipa_qmi_notify_filter_installed,
+	},
 };
 
 /* Handle an INIT_DRIVER response message from the modem. */
@@ -266,7 +383,6 @@ static const struct qmi_msg_handler ipa_client_msg_handlers[] = {
 		.decoded_size	= IPA_QMI_INIT_DRIVER_RSP_SZ,
 		.fn		= ipa_client_init_driver,
 	},
-	{ },
 };
 
 /* Return a pointer to an init modem driver request structure, which contains
@@ -280,7 +396,6 @@ static const struct ipa_init_modem_driver_req *
 init_modem_driver_req(struct ipa_qmi *ipa_qmi)
 {
 	struct ipa *ipa = container_of(ipa_qmi, struct ipa, qmi);
-	u32 modem_route_count = ipa->modem_route_count;
 	static struct ipa_init_modem_driver_req req;
 	const struct ipa_mem *mem;
 
@@ -295,32 +410,32 @@ init_modem_driver_req(struct ipa_qmi *ipa_qmi)
 	req.platform_type_valid = 1;
 	req.platform_type = IPA_QMI_PLATFORM_TYPE_MSM_ANDROID;
 
-	mem = ipa_mem_find(ipa, IPA_MEM_MODEM_HEADER);
+	mem = &ipa->mem[IPA_MEM_MODEM_HEADER];
 	if (mem->size) {
 		req.hdr_tbl_info_valid = 1;
 		req.hdr_tbl_info.start = ipa->mem_offset + mem->offset;
 		req.hdr_tbl_info.end = req.hdr_tbl_info.start + mem->size - 1;
 	}
 
-	mem = ipa_mem_find(ipa, IPA_MEM_V4_ROUTE);
+	mem = &ipa->mem[IPA_MEM_V4_ROUTE];
 	req.v4_route_tbl_info_valid = 1;
 	req.v4_route_tbl_info.start = ipa->mem_offset + mem->offset;
-	req.v4_route_tbl_info.end = modem_route_count - 1;
+	req.v4_route_tbl_info.count = 6; /* FIXME */
 
-	mem = ipa_mem_find(ipa, IPA_MEM_V6_ROUTE);
+	mem = &ipa->mem[IPA_MEM_V6_ROUTE];
 	req.v6_route_tbl_info_valid = 1;
 	req.v6_route_tbl_info.start = ipa->mem_offset + mem->offset;
-	req.v6_route_tbl_info.end = modem_route_count - 1;
+	req.v6_route_tbl_info.count = 6; /* FIXME: */
 
-	mem = ipa_mem_find(ipa, IPA_MEM_V4_FILTER);
+	mem = &ipa->mem[IPA_MEM_V4_FILTER];
 	req.v4_filter_tbl_start_valid = 1;
 	req.v4_filter_tbl_start = ipa->mem_offset + mem->offset;
 
-	mem = ipa_mem_find(ipa, IPA_MEM_V6_FILTER);
+	mem = &ipa->mem[IPA_MEM_V6_FILTER];
 	req.v6_filter_tbl_start_valid = 1;
 	req.v6_filter_tbl_start = ipa->mem_offset + mem->offset;
 
-	mem = ipa_mem_find(ipa, IPA_MEM_MODEM);
+	mem = &ipa->mem[IPA_MEM_MODEM];
 	if (mem->size) {
 		req.modem_mem_info_valid = 1;
 		req.modem_mem_info.start = ipa->mem_offset + mem->offset;
@@ -333,7 +448,7 @@ init_modem_driver_req(struct ipa_qmi *ipa_qmi)
 
 	/* skip_uc_load_valid and skip_uc_load are set above */
 
-	mem = ipa_mem_find(ipa, IPA_MEM_MODEM_PROC_CTX);
+	mem = &ipa->mem[IPA_MEM_MODEM_PROC_CTX];
 	if (mem->size) {
 		req.hdr_proc_ctx_tbl_info_valid = 1;
 		req.hdr_proc_ctx_tbl_info.start =
@@ -342,39 +457,47 @@ init_modem_driver_req(struct ipa_qmi *ipa_qmi)
 			req.hdr_proc_ctx_tbl_info.start + mem->size - 1;
 	}
 
-	/* Nothing to report for the compression table (zip_tbl_info) */
+	mem = &ipa->mem[IPA_MEM_ZIP];
+	if (mem->size) {
+		req.zip_tbl_info_valid = 1;
+		req.zip_tbl_info.start = ipa->mem_offset + mem->offset;
+		req.zip_tbl_info.end = ipa->mem_offset + mem->size - 1;
+	}
 
-	mem = ipa_mem_find(ipa, IPA_MEM_V4_ROUTE_HASHED);
+	mem = &ipa->mem[IPA_MEM_V4_ROUTE_HASHED];
 	if (mem->size) {
 		req.v4_hash_route_tbl_info_valid = 1;
 		req.v4_hash_route_tbl_info.start =
 				ipa->mem_offset + mem->offset;
-		req.v4_hash_route_tbl_info.end = modem_route_count - 1;
+		req.v4_hash_route_tbl_info.count =
+				IPA_ROUTE_COUNT_MAX;
 	}
 
-	mem = ipa_mem_find(ipa, IPA_MEM_V6_ROUTE_HASHED);
+	mem = &ipa->mem[IPA_MEM_V6_ROUTE_HASHED];
 	if (mem->size) {
 		req.v6_hash_route_tbl_info_valid = 1;
 		req.v6_hash_route_tbl_info.start =
 			ipa->mem_offset + mem->offset;
-		req.v6_hash_route_tbl_info.end = modem_route_count - 1;
+		req.v6_hash_route_tbl_info.count =
+			IPA_ROUTE_COUNT_MAX;
 	}
 
-	mem = ipa_mem_find(ipa, IPA_MEM_V4_FILTER_HASHED);
+	mem = &ipa->mem[IPA_MEM_V4_FILTER_HASHED];
 	if (mem->size) {
 		req.v4_hash_filter_tbl_start_valid = 1;
-		req.v4_hash_filter_tbl_start = ipa->mem_offset + mem->offset;
+		req.v4_hash_filter_tbl_start = ipa->mem_offset + mem->offset;;
 	}
 
-	mem = ipa_mem_find(ipa, IPA_MEM_V6_FILTER_HASHED);
+	mem = &ipa->mem[IPA_MEM_V6_FILTER_HASHED];
 	if (mem->size) {
 		req.v6_hash_filter_tbl_start_valid = 1;
-		req.v6_hash_filter_tbl_start = ipa->mem_offset + mem->offset;
+		req.v6_hash_filter_tbl_start = ipa->mem_offset + mem->offset;;
 	}
 
-	/* The stats fields are only valid for IPA v4.0+ */
-	if (ipa->version >= IPA_VERSION_4_0) {
-		mem = ipa_mem_find(ipa, IPA_MEM_STATS_QUOTA_MODEM);
+	/* None of the stats fields are valid (IPA v4.0 and above) */
+
+	if (ipa->version != IPA_VERSION_3_5_1) {
+		mem = &ipa->mem[IPA_MEM_STATS_QUOTA];
 		if (mem->size) {
 			req.hw_stats_quota_base_addr_valid = 1;
 			req.hw_stats_quota_base_addr =
@@ -383,9 +506,8 @@ init_modem_driver_req(struct ipa_qmi *ipa_qmi)
 			req.hw_stats_quota_size = ipa->mem_offset + mem->size;
 		}
 
-		/* If the DROP stats region is defined, include it */
-		mem = ipa_mem_find(ipa, IPA_MEM_STATS_DROP);
-		if (mem && mem->size) {
+		mem = &ipa->mem[IPA_MEM_STATS_DROP];
+		if (mem->size) {
 			req.hw_stats_drop_base_addr_valid = 1;
 			req.hw_stats_drop_base_addr =
 				ipa->mem_offset + mem->offset;
@@ -413,7 +535,7 @@ static void ipa_client_init_driver_work(struct work_struct *work)
 	qmi = &ipa_qmi->client_handle;
 
 	ipa = container_of(ipa_qmi, struct ipa, qmi);
-	dev = ipa->dev;
+	dev = &ipa->pdev->dev;
 
 	ret = qmi_txn_init(qmi, &txn, NULL, NULL);
 	if (ret < 0) {
@@ -464,7 +586,10 @@ static const struct qmi_ops ipa_client_ops = {
 	.new_server	= ipa_client_new_server,
 };
 
-/* Set up for QMI message exchange */
+/* This is called by ipa_setup().  We can be informed via remoteproc that
+ * the modem has shut down, in which case this function will be called
+ * again to prepare for it coming back up again.
+ */
 int ipa_qmi_setup(struct ipa *ipa)
 {
 	struct ipa_qmi *ipa_qmi = &ipa->qmi;
@@ -520,7 +645,6 @@ err_server_handle_release:
 	return ret;
 }
 
-/* Tear down IPA QMI handles */
 void ipa_qmi_teardown(struct ipa *ipa)
 {
 	cancel_work_sync(&ipa->qmi.init_driver_work);

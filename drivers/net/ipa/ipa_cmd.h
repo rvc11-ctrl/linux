@@ -1,33 +1,31 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 
 /* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
- * Copyright (C) 2019-2024 Linaro Ltd.
+ * Copyright (C) 2019-2020 Linaro Ltd.
  */
 #ifndef _IPA_CMD_H_
 #define _IPA_CMD_H_
 
 #include <linux/types.h>
+#include <linux/dma-direction.h>
 
-struct gsi_channel;
-struct gsi_trans;
+struct sk_buff;
+struct scatterlist;
+
 struct ipa;
 struct ipa_mem;
+struct ipa_trans;
+struct ipa_trans_info;
+struct gsi_channel; /*FIXME*/
 
 /**
  * enum ipa_cmd_opcode:	IPA immediate commands
  *
- * @IPA_CMD_IP_V4_FILTER_INIT:	Initialize IPv4 filter table
- * @IPA_CMD_IP_V6_FILTER_INIT:	Initialize IPv6 filter table
- * @IPA_CMD_IP_V4_ROUTING_INIT:	Initialize IPv4 routing table
- * @IPA_CMD_IP_V6_ROUTING_INIT:	Initialize IPv6 routing table
- * @IPA_CMD_HDR_INIT_LOCAL:	Initialize IPA-local header memory
- * @IPA_CMD_REGISTER_WRITE:	Register write performed by IPA
- * @IPA_CMD_IP_PACKET_INIT:	Set up next packet's destination endpoint
- * @IPA_CMD_DMA_SHARED_MEM:	DMA command performed by IPA
- * @IPA_CMD_IP_PACKET_TAG_STATUS: Have next packet generate tag * status
- * @IPA_CMD_NONE:		Special (invalid) "not a command" value
- *
  * All immediate commands are issued using the AP command TX endpoint.
+ * The numeric values here are the opcodes for IPA v3.5.1 hardware.
+ *
+ * IPA_CMD_NONE is a special (invalid) value that's used to indicate
+ * a request is *not* an immediate command.
  */
 enum ipa_cmd_opcode {
 	IPA_CMD_NONE			= 0x0,
@@ -36,6 +34,7 @@ enum ipa_cmd_opcode {
 	IPA_CMD_IP_V4_ROUTING_INIT	= 0x7,
 	IPA_CMD_IP_V6_ROUTING_INIT	= 0x8,
 	IPA_CMD_HDR_INIT_LOCAL		= 0x9,
+	IPA_CMD_HDR_INIT_SYSTEM		= 0xa,
 	IPA_CMD_REGISTER_WRITE		= 0xc,
 	IPA_CMD_IP_PACKET_INIT		= 0x10,
 	IPA_CMD_DMA_SHARED_MEM		= 0x13,
@@ -43,15 +42,54 @@ enum ipa_cmd_opcode {
 };
 
 /**
- * ipa_cmd_table_init_valid() - Validate a memory region holding a table
+ * struct ipa_cmd_info - information needed for an IPA immediate command
+ *
+ * @opcode:	The command opcode.
+ * @direction:	Direction of data transfer for DMA commands
+ */
+struct ipa_cmd_info {
+	enum ipa_cmd_opcode opcode;
+	enum dma_data_direction direction;
+};
+
+#ifdef IPA_VALIDATE
+
+/**
+ * ipa_cmd_table_valid() - Validate a memory region holding a table
  * @ipa:	- IPA pointer
  * @mem:	- IPA memory region descriptor
  * @route:	- Whether the region holds a route or filter table
+ * @ipv6:	- Whether the table is for IPv6 or IPv4
+ * @hashed:	- Whether the table is hashed or non-hashed
  *
  * Return:	true if region is valid, false otherwise
  */
-bool ipa_cmd_table_init_valid(struct ipa *ipa, const struct ipa_mem *mem,
-			      bool route);
+bool ipa_cmd_table_valid(struct ipa *ipa, const struct ipa_mem *mem,
+			    bool route, bool ipv6, bool hashed);
+
+/**
+ * ipa_cmd_data_valid() - Validate command-realted configuration is valid
+ * @ipa:	- IPA pointer
+ *
+ * Return:	true if assumptions required for command are valid
+ */
+bool ipa_cmd_data_valid(struct ipa *ipa);
+
+#else /* !IPA_VALIDATE */
+
+static inline bool ipa_cmd_table_valid(struct ipa *ipa,
+				       const struct ipa_mem *mem, bool route,
+				       bool ipv6, bool hashed)
+{
+	return true;
+}
+
+static inline bool ipa_cmd_data_valid(struct ipa *ipa)
+{
+	return true;
+}
+
+#endif /* !IPA_VALIDATE */
 
 /**
  * ipa_cmd_pool_init() - initialize command channel pools
@@ -60,7 +98,8 @@ bool ipa_cmd_table_init_valid(struct ipa *ipa, const struct ipa_mem *mem,
  *
  * Return:	0 if successful, or a negative error code
  */
-int ipa_cmd_pool_init(struct gsi_channel *channel, u32 tre_count);
+int ipa_cmd_pool_init(struct device *dev, struct ipa_trans_info *trans_info,
+		u32 tre_count, u32 tlv_count);
 
 /**
  * ipa_cmd_pool_exit() - Inverse of ipa_cmd_pool_init()
@@ -69,7 +108,7 @@ int ipa_cmd_pool_init(struct gsi_channel *channel, u32 tre_count);
 void ipa_cmd_pool_exit(struct gsi_channel *channel);
 
 /**
- * ipa_cmd_table_init_add() - Add table init command to a transaction
+ * ipa_cmd_table_init_add_v3() - Add table init command to a transaction
  * @trans:	GSI transaction
  * @opcode:	IPA immediate command opcode
  * @size:	Size of non-hashed routing table memory
@@ -81,22 +120,34 @@ void ipa_cmd_pool_exit(struct gsi_channel *channel);
  *
  * If hash_size is 0, hash_offset and hash_addr are ignored.
  */
-void ipa_cmd_table_init_add(struct gsi_trans *trans, enum ipa_cmd_opcode opcode,
+void ipa_v3_cmd_table_init_add(struct ipa_trans *trans, enum ipa_cmd_opcode opcode,
 			    u16 size, u32 offset, dma_addr_t addr,
 			    u16 hash_size, u32 hash_offset,
 			    dma_addr_t hash_addr);
 
+void ipa_v2_cmd_table_init_add(struct ipa_trans *trans, enum ipa_cmd_opcode opcode,
+				u16 size, u32 offset, dma_addr_t addr, bool ipv4);
+
 /**
  * ipa_cmd_hdr_init_local_add() - Add a header init command to a transaction
- * @trans:	GSI transaction
+ * @ipa:	IPA structure
  * @offset:	Offset of header memory in IPA local space
  * @size:	Size of header memory
  * @addr:	DMA address of buffer to be written from
  *
  * Defines and fills the location in IPA memory to use for headers.
  */
-void ipa_cmd_hdr_init_local_add(struct gsi_trans *trans, u32 offset, u16 size,
+void ipa_cmd_hdr_init_local_add(struct ipa_trans *trans, u32 offset, u16 size,
 				dma_addr_t addr);
+
+/**
+ * ipa_cmd_hdr_init_system_add() - Add a header init command to a transaction
+ * @ipa:	IPA structure
+ * @addr:	DMA address of buffer to be written from
+ *
+ * Defines and fills the location in IPA memory to use for headers.
+ */
+void ipa_cmd_hdr_init_system_add(struct ipa_trans *trans, dma_addr_t addr);
 
 /**
  * ipa_cmd_register_write_add() - Add a register write command to a transaction
@@ -106,7 +157,7 @@ void ipa_cmd_hdr_init_local_add(struct gsi_trans *trans, u32 offset, u16 size,
  * @mask:	Mask of bits in register to update with bits from value
  * @clear_full: Pipeline clear option; true means full pipeline clear
  */
-void ipa_cmd_register_write_add(struct gsi_trans *trans, u32 offset, u32 value,
+void ipa_cmd_register_write_add(struct ipa_trans *trans, u32 offset, u32 value,
 				u32 mask, bool clear_full);
 
 /**
@@ -117,28 +168,30 @@ void ipa_cmd_register_write_add(struct gsi_trans *trans, u32 offset, u32 value,
  * @addr:	DMA address of buffer to be read into or written from
  * @toward_ipa:	true means write to IPA memory; false means read
  */
-void ipa_cmd_dma_shared_mem_add(struct gsi_trans *trans, u32 offset,
+void ipa_cmd_dma_shared_mem_add(struct ipa_trans *trans, u32 offset,
 				u16 size, dma_addr_t addr, bool toward_ipa);
 
 /**
- * ipa_cmd_pipeline_clear_add() - Add pipeline clear commands to a transaction
+ * ipa_cmd_tag_process_add() - Add IPA tag process commands to a transaction
  * @trans:	GSI transaction
  */
-void ipa_cmd_pipeline_clear_add(struct gsi_trans *trans);
+void ipa_cmd_tag_process_add(struct ipa_trans *trans);
 
 /**
- * ipa_cmd_pipeline_clear_count() - # commands required to clear pipeline
+ * ipa_cmd_tag_process_add_count() - Number of commands in a tag process
  *
  * Return:	The number of elements to allocate in a transaction
- *		to hold commands to clear the pipeline
+ *		to hold tag process commands
  */
-u32 ipa_cmd_pipeline_clear_count(void);
+u32 ipa_cmd_tag_process_count(void);
 
 /**
- * ipa_cmd_pipeline_clear_wait() - Wait pipeline clear to complete
- * @ipa:	- IPA pointer
+ * ipa_cmd_tag_process() - Perform a tag process
+ *
+ * @Return:	The number of elements to allocate in a transaction
+ *		to hold tag process commands
  */
-void ipa_cmd_pipeline_clear_wait(struct ipa *ipa);
+void ipa_cmd_tag_process(struct ipa *ipa);
 
 /**
  * ipa_cmd_trans_alloc() - Allocate a transaction for the command TX endpoint
@@ -148,16 +201,6 @@ void ipa_cmd_pipeline_clear_wait(struct ipa *ipa);
  * Return:	A GSI transaction structure, or a null pointer if all
  *		available transactions are in use
  */
-struct gsi_trans *ipa_cmd_trans_alloc(struct ipa *ipa, u32 tre_count);
-
-/**
- * ipa_cmd_init() - Initialize IPA immediate commands
- * @ipa:	- IPA pointer
- *
- * Return:	0 if successful, or a negative error code
- *
- * There is no need for a matching ipa_cmd_exit() function.
- */
-int ipa_cmd_init(struct ipa *ipa);
+struct ipa_trans *ipa_cmd_trans_alloc(struct ipa *ipa, u32 tre_count);
 
 #endif /* _IPA_CMD_H_ */

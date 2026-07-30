@@ -16,6 +16,7 @@
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/thermal/thermal.h>
 #include <dt-bindings/soc/qcom,apr.h>
+#include <dt-bindings/sound/qcom,q6dsp-lpass-ports.h>
 
 / {
 	interrupt-parent = <&intc>;
@@ -31,6 +32,13 @@
 	chosen { };
 
 	clocks {
+		int_cdc_bclk: int-cdc-bclk {
+			compatible = "fixed-clock";
+			#clock-cells = <0>;
+			clock-frequency = <1536000>;
+			clock-output-names = "int_cdc_bclk";
+		};
+
 		xo_board: xo-board {
 			compatible = "fixed-clock";
 			#clock-cells = <0>;
@@ -691,6 +699,52 @@
 				 <&gcc GCC_AGGRE2_UFS_AXI_CLK>,
 				 <&gcc GCC_AGGRE2_USB3_AXI_CLK>,
 				 <&gcc GCC_CFG_NOC_USB2_AXI_CLK>;
+		};
+
+		/*
+		 * IPA v2.6L BAM. Register window for IPA core is at
+		 * IPA_BASE + 0x40000 (see IPA_REG_BASE_OFST_v2_6L).
+		 */
+		ipa_bam: dma-controller@14784000 {
+			compatible = "qcom,bam-v1.7.0";
+			reg = <0x14784000 0x26934>;
+			interrupts = <GIC_SPI 432 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&rpmcc RPM_SMD_IPA_CLK>;
+			clock-names = "bam_clk";
+			#dma-cells = <1>;
+			qcom,ee = <0>;
+			qcom,controlled-remotely;
+			status = "disabled";
+		};
+
+		ipa: ipa@147c0000 {
+			compatible = "qcom,sdm660-ipa";
+
+			/* IPA_REG_BASE_OFST_v2_6L = 0x40000 from 0x14780000 */
+			reg = <0x147c0000 0x5000>,
+			      <0x147c5000 0x2000>;
+			reg-names = "ipa-reg", "ipa-shared";
+
+			interrupts = <GIC_SPI 333 IRQ_TYPE_EDGE_RISING>;
+			interrupt-names = "ipa";
+
+			clocks = <&rpmcc RPM_SMD_IPA_CLK>;
+			clock-names = "core";
+
+			interconnects = <&a2noc MASTER_IPA &bimc SLAVE_EBI>,
+					<&a2noc MASTER_IPA &snoc SLAVE_IMEM>,
+					<&snoc MASTER_A2NOC_SNOC &cnoc SLAVE_A2NOC_CFG>;
+			interconnect-names = "memory",
+					     "imem",
+					     "config";
+
+			dmas = <&ipa_bam 2>, <&ipa_bam 3>, <&ipa_bam 4>, <&ipa_bam 5>,
+			       <&ipa_bam 6>, <&ipa_bam 7>, <&ipa_bam 8>, <&ipa_bam 9>;
+			dma-names = "ap_lan_rx", "cmd_tx", "ap_modem_tx", "ap_modem_rx",
+				    "modem_lan_tx", "modem_cmd_tx", "modem_lan_rx", "modem_ap_rx";
+
+			modem-remoteproc = <&remoteproc_mss>;
+			status = "disabled";
 		};
 
 		mnoc: interconnect@1745000 {
@@ -2379,6 +2433,23 @@
 			};
 		};
 
+		lpass_codec: audio-codec@152c0000 {
+			compatible = "qcom,msm8916-wcd-digital-codec";
+			reg = <0x152c0000 0x400>;
+
+			clocks = <&int_cdc_bclk>,
+				<&q6afecc LPASS_CLK_ID_INT_MCLK_0 LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+			clock-names = "ahbix-clk", "mclk";
+
+			assigned-clocks = <&q6afecc LPASS_CLK_ID_INT_MCLK_0 LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+			assigned-clock-rates = <9600000>;
+			/* Resolve naming conflicts with digital and analog PDM_RX* */
+			sound-name-prefix = "Digital";
+			#sound-dai-cells = <1>;
+
+			status = "disabled";
+		};
+
 		adsp_pil: remoteproc@15700000 {
 			compatible = "qcom,sdm660-adsp-pas";
 			reg = <0x15700000 0x4040>;
@@ -2424,6 +2495,13 @@
 					q6afe: service@4 {
 						compatible = "qcom,q6afe";
 						reg = <APR_SVC_AFE>;
+						qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
+
+						q6afecc: clock-controller {
+							compatible = "qcom,q6afe-clocks";
+							#clock-cells = <2>;
+						};
+
 						q6afedai: dais {
 							compatible = "qcom,q6afe-dais";
 							#address-cells = <1>;
@@ -2435,6 +2513,8 @@
 					q6asm: service@7 {
 						compatible = "qcom,q6asm";
 						reg = <APR_SVC_ASM>;
+						qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
+
 						q6asmdai: dais {
 							compatible = "qcom,q6asm-dais";
 							#address-cells = <1>;
@@ -2447,6 +2527,8 @@
 					q6adm: service@8 {
 						compatible = "qcom,q6adm";
 						reg = <APR_SVC_ADM>;
+						qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
+
 						q6routing: routing {
 							compatible = "qcom,q6adm-routing";
 							#sound-dai-cells = <0>;

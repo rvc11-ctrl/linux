@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/panel/shenchao,td4310.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Shenchao TD4310 DSI Display Panel
+
+maintainers:
+  - RVC11 <membermadde.insiddev25120@hotmail.com>
+
+allOf:
+  - $ref: panel-common.yaml#
+
+properties:
+  compatible:
+    enum:
+      - shenchao,td4310-xiaomi-whyred
+
+  reg:
+    maxItems: 1
+
+  reset-gpios: true
+  backlight: true
+
+  vddio-supply:
+    description: phandle of the regulator that provides the supply for IO lines
+
+  port: true
+  rotation: true
+  width-mm: true
+  height-mm: true
+
+required:
+  - compatible
+  - reg
+  - reset-gpios
+  - vddio-supply
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+    dsi {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        panel@0 {
+            compatible = "shenchao,td4310-xiaomi-whyred";
+            reg = <0>;
+            reset-gpios = <&tlmm 53 GPIO_ACTIVE_LOW>;
+            vddio-supply = <&vreg_l11a_1p8>;
+            backlight = <&pm660l_wled>;
+            port {
+                panel_in: endpoint {
+                    remote-endpoint = <&mdss_dsi0_out>;
+                };
+            };
+        };
+    };
+
+...

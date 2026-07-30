@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-FileCopyrightText: 2026 RVC11 <membermadde.insiddev25120@hotmail.com>
+
+/dts-v1/;
+
+#include "sdm636-xiaomi-whyred-common.dtsi"
+
+/ {
+	model = "Xiaomi Redmi Note 5 Pro (Shenchao)";
+	compatible = "xiaomi,whyred-shenchao", "qcom,sdm636";
+};
+
+&panel {
+	compatible = "shenchao,td4310-xiaomi-whyred";
+};
